@@ -1,0 +1,267 @@
+# ============================================================
+# GER Economic Model - Full Research Framework
+# ============================================================
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import minimize
+from scipy.linalg import eigvals
+from scipy.stats import jarque_bera
+from statsmodels.tsa.stattools import adfuller, acf
+import statsmodels.api as sm
+
+print("============================================")
+print(" GER Economic Model - Research Framework ")
+print("============================================")
+
+# ============================================================
+# 1 DATA
+# ============================================================
+
+years = np.arange(2000,2024)
+
+gdp = np.array([
+3986.76,4002.15,4003.83,4065.29,4154.16,4229.1,4287.14,
+4350.76,4297.49,4052.83,4218.91,4219.91,4277.93,
+4363.7,4376.63,4444.93,4478.44,4553.47,4582.76,
+4564.33,4375.04,4487.02,4529.85,4605.91
+])
+
+growth = np.diff(np.log(gdp))
+
+print("Observations:",len(growth))
+print("Mean:",growth.mean())
+print("Std:",growth.std())
+
+# ============================================================
+# 2 STATIONARITY TEST
+# ============================================================
+
+print("\n--- ADF TEST ---")
+
+adf = adfuller(growth)
+
+print("ADF statistic:",adf[0])
+print("p-value:",adf[1])
+
+# ============================================================
+# 3 AR(1)
+# ============================================================
+
+def fit_ar1(data):
+
+    y = data[1:]
+    x = data[:-1]
+
+    X = sm.add_constant(x)
+
+    model = sm.OLS(y,X).fit()
+
+    return model
+
+# ============================================================
+# 4 AR(2)
+# ============================================================
+
+def fit_ar2(data):
+
+    y = data[2:]
+
+    x1 = data[1:-1]
+    x2 = data[:-2]
+
+    X = np.column_stack([x1,x2])
+    X = sm.add_constant(X)
+
+    model = sm.OLS(y,X).fit()
+
+    return model
+
+# ============================================================
+# 5 GER MODEL
+# ============================================================
+
+def ger_predict(params,data):
+
+    phi,alpha = params
+
+    pred = []
+
+    for t in range(1,len(data)-1):
+
+        p = phi*data[t] - alpha*data[t-1]
+
+        pred.append(p)
+
+    return np.array(pred)
+
+def ger_loss(params,data):
+
+    pred = ger_predict(params,data)
+
+    true = data[2:]
+
+    return np.mean((pred-true)**2)
+
+# ============================================================
+# 6 GER OPTIMIZATION
+# ============================================================
+
+res = minimize(
+    ger_loss,
+    x0=[0.5,0.2],
+    args=(growth,),
+    bounds=[(0,2),(0,2)]
+)
+
+phi,alpha = res.x
+
+print("\n--- GER PARAMETERS ---")
+print("phi =",phi)
+print("alpha =",alpha)
+
+# ============================================================
+# 7 MODEL FIT
+# ============================================================
+
+pred = ger_predict(res.x,growth)
+
+true = growth[2:]
+
+resid = true - pred
+
+mse = np.mean(resid**2)
+
+rmse = np.sqrt(mse)
+
+print("\nRMSE:",rmse)
+
+# ============================================================
+# 8 INFORMATION CRITERIA
+# ============================================================
+
+def aic(n,mse,k):
+    return n*np.log(mse)+2*k
+
+def bic(n,mse,k):
+    return n*np.log(mse)+k*np.log(n)
+
+n = len(true)
+
+aic_ger = aic(n,mse,2)
+bic_ger = bic(n,mse,2)
+
+# ============================================================
+# 9 AR MODELS
+# ============================================================
+
+ar1 = fit_ar1(growth)
+ar2 = fit_ar2(growth)
+
+print("\n--- MODEL COMPARISON ---")
+print("AR1 AIC:",ar1.aic)
+print("AR2 AIC:",ar2.aic)
+print("GER AIC:",aic_ger)
+
+# ============================================================
+# 10 RESIDUAL DIAGNOSTICS
+# ============================================================
+
+jb = jarque_bera(resid)
+
+print("\n--- RESIDUAL TEST ---")
+print("Jarque-Bera:",jb)
+
+acf_vals = acf(resid,nlags=8)
+
+# ============================================================
+# 11 DYNAMICAL STABILITY
+# ============================================================
+
+A = np.array([
+[phi,-alpha],
+[1,0]
+])
+
+eig = eigvals(A)
+
+lyapunov = np.log(np.max(np.abs(eig)))
+
+print("\n--- DYNAMICS ---")
+print("Eigenvalues:",eig)
+print("Lyapunov:",lyapunov)
+
+if lyapunov < 0:
+    print("Stable system")
+
+elif lyapunov == 0:
+    print("Periodic")
+
+else:
+    print("Chaotic tendency")
+
+# ============================================================
+# 12 FORECAST
+# ============================================================
+
+g_t = growth[-1]
+g_tm1 = growth[-2]
+
+forecast = phi*g_t - alpha*g_tm1
+
+print("\nNext growth forecast:",forecast)
+
+# ============================================================
+# 13 BOOTSTRAP INTERVAL
+# ============================================================
+
+sim = []
+
+for i in range(1000):
+
+    e = np.random.choice(resid)
+
+    sim.append(forecast + e)
+
+sim = np.array(sim)
+
+ci = np.percentile(sim,[5,95])
+
+print("90% forecast interval:",ci)
+
+# ============================================================
+# 14 VISUALIZATION
+# ============================================================
+
+years_vis = years[2:]
+
+plt.figure(figsize=(12,8))
+
+plt.subplot(221)
+plt.plot(years_vis,true,label="Real")
+plt.plot(years_vis,pred,label="GER")
+plt.legend()
+plt.title("Model Fit")
+
+plt.subplot(222)
+plt.plot(years_vis,resid)
+plt.axhline(0,color='black')
+plt.title("Residuals")
+
+plt.subplot(223)
+plt.bar(range(len(acf_vals)),acf_vals)
+plt.title("Residual ACF")
+
+plt.subplot(224)
+plt.hist(resid,bins=10)
+plt.title("Residual distribution")
+
+plt.tight_layout()
+plt.savefig("GER_research_results.png",dpi=200)
+plt.close()
+
+print("\nFigure saved: GER_research_results.png")
+
+print("\n============================================")
+print(" GER Research Analysis Complete ")
+print("============================================")
