@@ -1,0 +1,42 @@
+import numpy as np
+
+class SUDConnector:
+    def __init__(self, N=8):
+        self.N = N
+        # 黄金比の定義
+        self.phi = (1 + 5**0.5) / 2
+
+    def phi_space(self, x):
+        """
+        入力を黄金比空間（Phi Space）へ写像する。
+        x: 長さNの入力配列
+        """
+        r = []
+        for i in range(self.N):
+            # 黄金比の累乗に基づく正規化
+            denom = (self.phi**i * (self.phi - 1))
+            val = (x[i] - self.phi**i) / denom
+            r.append(val)
+        return np.array(r)
+
+    def fragility(self, r):
+        """
+        平衡点 (1/phi) からの偏差を計算し、
+        高次次元ほど重みを付けて「脆弱性」とする。
+        """
+        target = 1 / self.phi
+        return np.array([
+            abs(v - target) * (self.phi**i)
+            for i, v in enumerate(r)
+        ])
+
+    def health(self, r):
+        """
+        システム全体の健全性を 0.0 〜 1.0 で返す。
+        1.0 が完全な調和状態。
+        """
+        target = 1 / self.phi
+        # 平均偏差率を計算
+        deviation = np.mean(abs(r - target) / target)
+        # 負の値にならないようクリップ
+        return max(0.0, 1.0 - deviation)
